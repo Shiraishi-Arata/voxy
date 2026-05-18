@@ -8,6 +8,8 @@ import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.system.MemoryUtil;
 
+import java.lang.reflect.Field;
+
 import java.util.Locale;
 import java.util.Random;
 
@@ -54,7 +56,7 @@ public class Capabilities {
         var cap = GL.getCapabilities();
         this.sparseBuffer = cap.GL_ARB_sparse_buffer;
         this.compute = cap.glDispatchComputeIndirect != 0;
-        this.indirectParameters = cap.glMultiDrawElementsIndirectCountARB != 0;
+        this.indirectParameters = getFunctionAddress(cap, "glMultiDrawElementsIndirectCountARB", "glMultiDrawElementsIndirectCount") != 0;
         this.repFragTest = cap.GL_NV_representative_fragment_test;
         this.meshShaders = cap.GL_NV_mesh_shader;
         this.canQueryGpuMemory = cap.GL_NVX_gpu_memory_info;
@@ -112,6 +114,20 @@ public class Capabilities {
     }
 
     public static void init() {
+    }
+
+    private static long getFunctionAddress(Object capabilities, String... names) {
+        for (String name : names) {
+            try {
+                Field field = capabilities.getClass().getField(name);
+                long address = field.getLong(capabilities);
+                if (address != 0) {
+                    return address;
+                }
+            } catch (NoSuchFieldException | IllegalAccessException ignored) {
+            }
+        }
+        return 0;
     }
 
     private static boolean testDepthSampler() {

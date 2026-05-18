@@ -27,7 +27,7 @@ public class ThreadUtils {
         if (Platform.get() == Platform.LINUX) {
             long fn = 0;
             try {
-                var libc = APIUtil.apiCreateLibrary("libc.so.6");
+                var libc = APIUtil.apiCreateLibrary("libc.so");
                 fn = APIUtil.apiGetFunctionAddress(libc, "sched_setaffinity");
             } catch (Exception e) {
                 Logger.error(e);

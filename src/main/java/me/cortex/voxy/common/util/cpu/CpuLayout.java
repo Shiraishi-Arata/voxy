@@ -80,10 +80,17 @@ public class CpuLayout {
         Int2ObjectOpenHashMap<Affinity> affinityMsk = new Int2ObjectOpenHashMap<>();
         for (var thread : processor.getLogicalProcessors()) {
             var aff = affinityMsk.getOrDefault(thread.getPhysicalProcessorNumber(), new Affinity(0, (short) thread.getProcessorGroup()));
-            if (thread.getProcessorGroup() != aff.group) {
-                throw new IllegalStateException();
+            if (thread.getPhysicalProcessorNumber() < 0) {
+                continue;
             }
-            affinityMsk.put(thread.getPhysicalProcessorNumber(), new Affinity(aff.msk|(1L<<thread.getProcessorNumber()), (short) thread.getProcessorGroup()));
+            if (thread.getProcessorNumber() < 0 || thread.getProcessorNumber() >= Long.SIZE) {
+                continue;
+            }
+            short group = (short) thread.getProcessorGroup();
+            if (thread.getProcessorGroup() != aff.group && aff.msk != 0) {
+                continue;
+            }
+            affinityMsk.put(thread.getPhysicalProcessorNumber(), new Affinity(aff.msk | (1L << thread.getProcessorNumber()), group));
         }
 
         var cores = new Core[processor.getPhysicalProcessors().size()];
@@ -98,9 +105,15 @@ public class CpuLayout {
         for (var core : processor.getPhysicalProcessors()) {
             var aff = affinityMsk.remove(core.getPhysicalProcessorNumber());
             if (aff == null) {
-                throw new IllegalStateException();
+                continue;
             }
             cores[i++] = new Core(core.getEfficiency()==0&&!allSameEfficiency, aff);
+        }
+        if (i == 0) {
+            return null;
+        }
+        if (i != cores.length) {
+            cores = Arrays.copyOf(cores, i);
         }
         sort(cores);
         return cores;

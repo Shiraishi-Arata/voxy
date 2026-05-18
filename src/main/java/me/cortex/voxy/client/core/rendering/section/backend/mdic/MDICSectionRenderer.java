@@ -29,6 +29,7 @@ import java.util.List;
 
 import static org.lwjgl.opengl.ARBIndirectParameters.GL_PARAMETER_BUFFER_ARB;
 import static org.lwjgl.opengl.ARBIndirectParameters.glMultiDrawElementsIndirectCountARB;
+import static org.lwjgl.opengl.GL46C.glMultiDrawElementsIndirectCount;
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL15.GL_ELEMENT_ARRAY_BUFFER;
 import static org.lwjgl.opengl.GL15.glBindBuffer;
@@ -183,6 +184,17 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         glBindBuffer(GL_PARAMETER_BUFFER_ARB, viewport.drawCountCallBuffer.id);
     }
 
+    private static void drawElementsIndirectCount(int mode, int type, long indirect, long drawCount, int maxDrawCount, int stride) {
+        if (Capabilities.INSTANCE.indirectParameters) {
+            try {
+                glMultiDrawElementsIndirectCount(mode, type, indirect, drawCount, maxDrawCount, stride);
+                return;
+            } catch (Throwable ignored) {
+            }
+        }
+        glMultiDrawElementsIndirectCountARB(mode, type, indirect, drawCount, maxDrawCount, stride);
+    }
+
     private void renderTerrain(MDICViewport viewport, long indirectOffset, long drawCountOffset, int maxDrawCount) {
         //RenderLayer.getCutoutMipped().startDrawing();
 
@@ -202,7 +214,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
         if (VoxyClient.getOcclusionDebugState()==3) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         }
-        glMultiDrawElementsIndirectCountARB(GL_TRIANGLES, GL_UNSIGNED_SHORT, indirectOffset, drawCountOffset, maxDrawCount, 0);
+        drawElementsIndirectCount(GL_TRIANGLES, GL_UNSIGNED_SHORT, indirectOffset, drawCountOffset, maxDrawCount, 0);
         if (VoxyClient.getOcclusionDebugState()==3) {
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         }
@@ -243,7 +255,7 @@ public class MDICSectionRenderer extends AbstractSectionRenderer<MDICViewport, B
 
         glMemoryBarrier(GL_COMMAND_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT);//Barrier everything is needed
         glProvokingVertex(GL_FIRST_VERTEX_CONVENTION);
-        glMultiDrawElementsIndirectCountARB(GL_TRIANGLES, GL_UNSIGNED_SHORT, TRANSLUCENT_OFFSET*5*4, 4*4, Math.min(this.geometryManager.getSectionCount(), TRANSLUCENT_DRAW_COUNT), 0);
+        drawElementsIndirectCount(GL_TRIANGLES, GL_UNSIGNED_SHORT, TRANSLUCENT_OFFSET*5*4, 4*4, Math.min(this.geometryManager.getSectionCount(), TRANSLUCENT_DRAW_COUNT), 0);
 
         glEnable(GL_CULL_FACE);
         glBindVertexArray(0);

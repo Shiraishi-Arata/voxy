@@ -227,6 +227,8 @@ tasks.register('makeExcludedRocksDB', Zip) {
 
 processIncludeJars {
     outputs.cacheIf {true}
+    dependsOn "prepareLocalLinuxNativeIncludeJars"
+    jars.from(fileTree(dir: "$buildDir/generated/local-linux-native-include-jars", include: ["*.jar"]))
     if (!INCLUDE_OTHER_ARCHS) {
         dependsOn makeExcludedRocksDB
         jars = jars.filter {!it.name.startsWith('rocksdb')}
@@ -235,6 +237,10 @@ processIncludeJars {
 }
 
 jar {
+    dependsOn "prepareLocalLinuxNativeIncludeJars"
+    from(fileTree(dir: "$buildDir/generated/local-linux-native-include-jars", include: ["*.jar"])) {
+        into("META-INF/jars")
+    }
     doFirst {
         delete fileTree(getDestinationDirectory().get())
     }
@@ -250,6 +256,72 @@ jar {
 project.ext.lwjglVersion = "3.4.1"
 project.ext.lwjglNatives = "natives-windows"
 
+tasks.register("prepareLocalLinuxNativeIncludeJars") {
+    def sourceTree = fileTree(dir: "$rootDir/jars", include: ["*lwjgl*natives-linux*.jar"])
+    def outputDir = layout.buildDirectory.dir("generated/local-linux-native-include-jars")
+    inputs.files(sourceTree)
+    outputs.dir(outputDir)
+
+    doLast {
+        def outDir = outputDir.get().asFile
+        delete(outDir)
+        outDir.mkdirs()
+
+        sourceTree.files.each { File inputJar ->
+            def outputJar = new File(outDir, inputJar.name)
+            def hadFabricModJson = false
+            def zipIn = new java.util.zip.ZipInputStream(new FileInputStream(inputJar))
+            def zipOut = new java.util.zip.ZipOutputStream(new FileOutputStream(outputJar))
+            try {
+                byte[] buffer = new byte[8192]
+                java.util.zip.ZipEntry entry
+                while ((entry = zipIn.nextEntry) != null) {
+                    if (entry.name == "fabric.mod.json") {
+                        hadFabricModJson = true
+                    }
+                    def newEntry = new java.util.zip.ZipEntry(entry.name)
+                    newEntry.setTime(entry.time)
+                    if (entry.method == java.util.zip.ZipEntry.STORED) {
+                        newEntry.setMethod(java.util.zip.ZipEntry.STORED)
+                        newEntry.setSize(entry.size)
+                        newEntry.setCompressedSize(entry.compressedSize)
+                        newEntry.setCrc(entry.crc)
+                    }
+                    zipOut.putNextEntry(newEntry)
+                    int read
+                    while ((read = zipIn.read(buffer)) > 0) {
+                        zipOut.write(buffer, 0, read)
+                    }
+                    zipOut.closeEntry()
+                    zipIn.closeEntry()
+                }
+
+                if (!hadFabricModJson) {
+                    def matcher = (inputJar.name =~ /^(lwjgl(?:-[A-Za-z0-9]+)*)-([0-9]+(?:\.[0-9]+){1,3})-natives-linux(?:-[A-Za-z0-9]+)?\.jar$/)
+                    def moduleName = matcher.matches() ? matcher.group(1).toLowerCase(Locale.ROOT) : inputJar.name.replaceAll(/\.jar$/, "").toLowerCase(Locale.ROOT)
+                    def moduleVersion = matcher.matches() ? matcher.group(2) : project.version.toString()
+                    def modId = "org_lwjgl_${moduleName}_natives-linux".replaceAll("[^a-z0-9_-]", "_")
+                    def json = """{
+  "schemaVersion": 1,
+  "id": "${modId}",
+  "version": "${moduleVersion}",
+  "name": "${moduleName}",
+  "custom": {
+    "fabric-loom:generated": true
+  }
+}"""
+                    zipOut.putNextEntry(new java.util.zip.ZipEntry("fabric.mod.json"))
+                    zipOut.write(json.getBytes("UTF-8"))
+                    zipOut.closeEntry()
+                }
+            } finally {
+                zipOut.close()
+                zipIn.close()
+            }
+        }
+    }
+}
+
 repositories {
     mavenCentral()
 }
@@ -262,15 +334,15 @@ dependencies {
     include(implementation "org.lwjgl:lwjgl-lmdb")
     include(implementation "org.lwjgl:lwjgl-zstd")
     runtimeOnly "org.lwjgl:lwjgl:$lwjglVersion:natives-windows"
-    runtimeOnly "org.lwjgl:lwjgl:$lwjglVersion:natives-linux"
     include(runtimeOnly "org.lwjgl:lwjgl-lmdb:$lwjglVersion:natives-windows")
     include(runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-windows")
-    include(runtimeOnly "org.lwjgl:lwjgl-lmdb:$lwjglVersion:natives-linux")
-    include(runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-linux")
+    // Linux LWJGL natives are sourced locally from rootDir/jars/*.jar
+    def localLinuxLwjglNatives = fileTree(dir: "$rootDir/jars", include: ["*lwjgl*natives-linux*.jar"])
+    runtimeOnly(localLinuxLwjglNatives)
     if (INCLUDE_OTHER_ARCHS) {
         runtimeOnly "org.lwjgl:lwjgl:$lwjglVersion:natives-linux-arm64"
-        include(runtimeOnly "org.lwjgl:lwjgl-lmdb:$lwjglVersion:natives-linux-arm64")
-        include(runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-linux-arm64")
+        runtimeOnly "org.lwjgl:lwjgl-lmdb:$lwjglVersion:natives-linux-arm64"
+        runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-linux-arm64"
     }
 
     include(implementation 'redis.clients:jedis:5.1.0')
@@ -289,6 +361,7 @@ dependencies {
     //implementation 'org.rocksdb:rocksdbjni:8.10.0'
     //implementation 'redis.clients:jedis:5.1.0'
 }
+
 
 /*
 if (!isInGHA) {
