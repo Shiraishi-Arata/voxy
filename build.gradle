@@ -228,7 +228,16 @@ tasks.register('makeExcludedRocksDB', Zip) {
 processIncludeJars {
     outputs.cacheIf {true}
     dependsOn "prepareLocalLinuxNativeIncludeJars"
-    jars.from(fileTree(dir: "$buildDir/generated/local-linux-native-include-jars", include: ["*.jar"]))
+
+    def localLinuxNativeIncludeJars = fileTree(dir: "$buildDir/generated/local-linux-native-include-jars", include: ["*.jar"])
+    jars.from(localLinuxNativeIncludeJars)
+    // Manually-added jars still need metadata for Loom before it can see their generated fabric.mod.json.
+    fileTree(dir: "$rootDir/jars", include: ["*lwjgl*natives-linux*.jar"]).files.each { File inputJar ->
+        def matcher = (inputJar.name =~ /^(lwjgl(?:-[A-Za-z0-9]+)*)-([0-9]+(?:\.[0-9]+){1,3})-(natives-linux(?:-[A-Za-z0-9]+)?)\.jar$/)
+        if (matcher.matches()) {
+            jarIds.put(inputJar.name, new net.fabricmc.loom.build.nesting.NestableJarGenerationTask.Metadata("org.lwjgl", matcher.group(1), matcher.group(2), matcher.group(3)))
+        }
+    }
     if (!INCLUDE_OTHER_ARCHS) {
         dependsOn makeExcludedRocksDB
         jars = jars.filter {!it.name.startsWith('rocksdb')}
@@ -326,13 +335,92 @@ repositories {
     mavenCentral()
 }
 
+abstract class AarToJarTransform implements org.gradle.api.artifacts.transform.TransformAction<org.gradle.api.artifacts.transform.TransformParameters.None> {
+    @org.gradle.api.artifacts.transform.InputArtifact
+    abstract org.gradle.api.provider.Provider<org.gradle.api.file.FileSystemLocation> getInputArtifact()
+
+    @Override
+    void transform(org.gradle.api.artifacts.transform.TransformOutputs outputs) {
+        def input = getInputArtifact().get().asFile
+        def outputName = input.name.endsWith('.aar') ? input.name.substring(0, input.name.length() - 4) + '.jar' : input.name + '.jar'
+        def output = outputs.file(outputName)
+
+        def seen = new java.util.HashSet<String>()
+        output.withOutputStream { fileOut ->
+            def jarOut = new java.util.zip.ZipOutputStream(fileOut)
+            try {
+                def aar = new java.util.zip.ZipFile(input)
+                try {
+                    def classesEntry = aar.getEntry('classes.jar')
+                    if (classesEntry != null) {
+                        def classesIn = new java.util.zip.ZipInputStream(aar.getInputStream(classesEntry))
+                        try {
+                            java.util.zip.ZipEntry nestedEntry
+                            while ((nestedEntry = classesIn.nextEntry) != null) {
+                                if (!nestedEntry.isDirectory() && seen.add(nestedEntry.name)) {
+                                    jarOut.putNextEntry(new java.util.zip.ZipEntry(nestedEntry.name))
+                                    classesIn.transferTo(jarOut)
+                                    jarOut.closeEntry()
+                                }
+                                classesIn.closeEntry()
+                            }
+                        } finally {
+                            classesIn.close()
+                        }
+                    }
+
+                    aar.entries().each { entry ->
+                        if (!entry.isDirectory() && entry.name.startsWith('jni/') && entry.name.endsWith('.so') && seen.add(entry.name)) {
+                            jarOut.putNextEntry(new java.util.zip.ZipEntry(entry.name))
+                            aar.getInputStream(entry).withCloseable { it.transferTo(jarOut) }
+                            jarOut.closeEntry()
+                        }
+                    }
+                } finally {
+                    aar.close()
+                }
+            } finally {
+                jarOut.close()
+            }
+        }
+    }
+}
+
+def artifactType = org.gradle.api.attributes.Attribute.of('artifactType', String)
+
+configurations.configureEach { configuration ->
+    if (configuration.canBeResolved) {
+        configuration.attributes.attribute(artifactType, 'jar')
+    }
+}
+
+dependencies {
+    attributesSchema {
+        attribute(artifactType)
+    }
+    registerTransform(AarToJarTransform) {
+        from.attribute(artifactType, 'aar')
+        to.attribute(artifactType, 'jar')
+    }
+    components {
+        withModule('io.maryk.rocksdb:rocksdb-android') {
+            allVariants {
+                attributes {
+                    attribute(org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(org.gradle.api.attributes.LibraryElements, org.gradle.api.attributes.LibraryElements.JAR))
+                    attribute(org.gradle.api.attributes.java.TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE, objects.named(org.gradle.api.attributes.java.TargetJvmEnvironment, org.gradle.api.attributes.java.TargetJvmEnvironment.STANDARD_JVM))
+                    attribute(org.gradle.api.attributes.java.TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 25)
+                }
+            }
+        }
+    }
+}
 
 dependencies {
     implementation platform("org.lwjgl:lwjgl-bom:$lwjglVersion")
 
     implementation "org.lwjgl:lwjgl"
-    include(implementation "org.lwjgl:lwjgl-lmdb")
-    include(implementation "org.lwjgl:lwjgl-zstd")
+    include(implementation("org.lwjgl:lwjgl-lmdb") { transitive = false })
+    include(implementation("org.lwjgl:lwjgl-zstd") { transitive = false })
     runtimeOnly "org.lwjgl:lwjgl:$lwjglVersion:natives-windows"
     include(runtimeOnly "org.lwjgl:lwjgl-lmdb:$lwjglVersion:natives-windows")
     include(runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-windows")
@@ -346,7 +434,7 @@ dependencies {
     }
 
     include(implementation 'redis.clients:jedis:5.1.0')
-    include(implementation('org.rocksdb:rocksdbjni:10.2.1'))//update to 10.10 when issue 14537 is fixed
+    include(implementation('io.maryk.rocksdb:rocksdb-android:10.10.1'))
     include(implementation 'org.apache.commons:commons-pool2:2.12.0')
     include(implementation 'org.lz4:lz4-java:1.8.0')
     include(implementation('org.tukaani:xz:1.10'))

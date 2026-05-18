@@ -52,7 +52,7 @@ public class RocksDBStorageBackend extends StorageBackend {
             }
         }
          */
-        RocksDB.loadLibrary();
+        RocksDBLibraryLoader.loadLibrary();
 
         //TODO: FIXME: DONT USE THE SAME options PER COLUMN FAMILY
         final ColumnFamilyOptions cfOpts = new ColumnFamilyOptions()
