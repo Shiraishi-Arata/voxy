@@ -16,9 +16,14 @@ import java.util.regex.Pattern;
 
 public class ShaderLoader {
     public static String parse(String id) {
-        var src =  "#version 460 core\n";
-        src += String.join("\n", ShaderLoadingParser.parseRoot(Identifier.parse(id)));
+        var identifier = Identifier.parse(id);
+        var src = defaultVersionForShaderPath(identifier.getPath());
+        src += String.join("\n", ShaderLoadingParser.parseRoot(identifier));
         return src;
+    }
+
+    private static String defaultVersionForShaderPath(String shaderPath) {
+        return shaderPath.endsWith(".comp") ? "#version 320\n" : "#version 150\n";
     }
 
 

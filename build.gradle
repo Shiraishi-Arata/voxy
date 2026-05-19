@@ -232,7 +232,7 @@ processIncludeJars {
     def localLinuxNativeIncludeJars = fileTree(dir: "$buildDir/generated/local-linux-native-include-jars", include: ["*.jar"])
     jars.from(localLinuxNativeIncludeJars)
     // Manually-added jars still need metadata for Loom before it can see their generated fabric.mod.json.
-    fileTree(dir: "$rootDir/jars", include: ["*lwjgl*natives-linux*.jar"]).files.each { File inputJar ->
+    fileTree(dir: "$rootDir/deps", include: ["*lwjgl*natives-linux*.jar"]).files.each { File inputJar ->
         def matcher = (inputJar.name =~ /^(lwjgl(?:-[A-Za-z0-9]+)*)-([0-9]+(?:\.[0-9]+){1,3})-(natives-linux(?:-[A-Za-z0-9]+)?)\.jar$/)
         if (matcher.matches()) {
             jarIds.put(inputJar.name, new net.fabricmc.loom.build.nesting.NestableJarGenerationTask.Metadata("org.lwjgl", matcher.group(1), matcher.group(2), matcher.group(3)))
@@ -266,7 +266,7 @@ project.ext.lwjglVersion = "3.4.1"
 project.ext.lwjglNatives = "natives-windows"
 
 tasks.register("prepareLocalLinuxNativeIncludeJars") {
-    def sourceTree = fileTree(dir: "$rootDir/jars", include: ["*lwjgl*natives-linux*.jar"])
+    def sourceTree = fileTree(dir: "$rootDir/deps", include: ["*lwjgl*natives-linux*.jar"])
     def outputDir = layout.buildDirectory.dir("generated/local-linux-native-include-jars")
     inputs.files(sourceTree)
     outputs.dir(outputDir)
@@ -333,6 +333,9 @@ tasks.register("prepareLocalLinuxNativeIncludeJars") {
 
 repositories {
     mavenCentral()
+    flatDir {
+        dirs "$rootDir/deps"
+    }
 }
 
 abstract class AarToJarTransform implements org.gradle.api.artifacts.transform.TransformAction<org.gradle.api.artifacts.transform.TransformParameters.None> {
@@ -424,8 +427,8 @@ dependencies {
     runtimeOnly "org.lwjgl:lwjgl:$lwjglVersion:natives-windows"
     include(runtimeOnly "org.lwjgl:lwjgl-lmdb:$lwjglVersion:natives-windows")
     include(runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-windows")
-    // Linux LWJGL natives are sourced locally from rootDir/jars/*.jar
-    def localLinuxLwjglNatives = fileTree(dir: "$rootDir/jars", include: ["*lwjgl*natives-linux*.jar"])
+    // Linux LWJGL natives are sourced locally from rootDir/deps/*.jar
+    def localLinuxLwjglNatives = fileTree(dir: "$rootDir/deps", include: ["*lwjgl*natives-linux*.jar"])
     runtimeOnly(localLinuxLwjglNatives)
     if (INCLUDE_OTHER_ARCHS) {
         runtimeOnly "org.lwjgl:lwjgl:$lwjglVersion:natives-linux-arm64"
@@ -434,7 +437,7 @@ dependencies {
     }
 
     include(implementation 'redis.clients:jedis:5.1.0')
-    include(implementation('io.maryk.rocksdb:rocksdb-android:10.10.1'))
+    include(implementation(group: 'com.arata', name: 'rocksdb-yukari', version: '10.2.1', ext: 'aar'))
     include(implementation 'org.apache.commons:commons-pool2:2.12.0')
     include(implementation 'org.lz4:lz4-java:1.8.0')
     include(implementation('org.tukaani:xz:1.10'))

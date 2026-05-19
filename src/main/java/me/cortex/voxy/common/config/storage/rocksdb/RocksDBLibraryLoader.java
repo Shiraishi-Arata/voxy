@@ -11,13 +11,7 @@ import java.util.Locale;
 
 final class RocksDBLibraryLoader {
     private static final String[] ANDROID_LIBRARY_LOAD_ORDER = {
-            "libc++_shared.so",
-            "libsnappy.so",
-            "libbz2.so",
-            "liblz4.so",
-            "libzstd.so",
-            "librocksdb.so",
-            "librocksdbjni.so"
+            "librocksdbjni-yukari.so"
     };
 
     private static boolean loaded;
@@ -51,7 +45,7 @@ final class RocksDBLibraryLoader {
         var resourceBase = "jni/" + abi + "/";
 
         try {
-            var tempDirectory = Files.createTempDirectory("voxy-rocksdb-android-");
+            var tempDirectory = Files.createTempDirectory("voxy-rocksdb-yukari-");
             tempDirectory.toFile().deleteOnExit();
 
             for (var libraryName : ANDROID_LIBRARY_LOAD_ORDER) {

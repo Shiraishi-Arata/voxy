@@ -13,6 +13,8 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.StampedLock;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
@@ -28,6 +30,7 @@ public abstract class VoxyInstance {
 
     private final StampedLock activeWorldLock = new StampedLock();
     private final HashMap<WorldIdentifier, WorldEngine> activeWorlds = new HashMap<>();
+    private final ConcurrentHashMap<WorldIdentifier, CompletableFuture<WorldEngine>> pendingWorldCreations = new ConcurrentHashMap<>();
 
     protected final ImportManager importManager;
 
@@ -148,25 +151,58 @@ public abstract class VoxyInstance {
             if (incrementRef) world.acquireRef();
             return world;
         }
-        long stamp = this.activeWorldLock.writeLock();
+        var creationFuture = this.pendingWorldCreations.computeIfAbsent(identifier, ignored -> new CompletableFuture<>());
+        if (!creationFuture.isDone()) {
+            boolean ownsCreation = false;
+            long stamp = this.activeWorldLock.writeLock();
+            try {
+                //Double-check after acquiring write lock to avoid duplicate creators.
+                world = this.activeWorlds.get(identifier);
+                if (world == null && !creationFuture.isDone()) {
+                    ownsCreation = true;
+                }
+            } finally {
+                this.activeWorldLock.unlockWrite(stamp);
+            }
 
-        if (!this.isRunning) {
-            Logger.error("Tried getting world object on voxy instance but its not running");
-            this.activeWorldLock.unlockWrite(stamp);
-            return null;
+            if (ownsCreation) {
+                WorldEngine newWorld = null;
+                try {
+                    //Create the world outside of the global world lock to avoid stalling the render thread while storage initializes.
+                    newWorld = this.createWorld(identifier);
+                    stamp = this.activeWorldLock.writeLock();
+                    try {
+                        world = this.activeWorlds.get(identifier);
+                        if (world == null) {
+                            this.activeWorlds.put(identifier, newWorld);
+                            world = newWorld;
+                            newWorld = null;
+                        }
+                    } finally {
+                        this.activeWorldLock.unlockWrite(stamp);
+                    }
+                    if (world == null) {
+                        throw new IllegalStateException("World creation produced null world");
+                    }
+                    creationFuture.complete(world);
+                } catch (Throwable t) {
+                    creationFuture.completeExceptionally(t);
+                    throw t;
+                } finally {
+                    if (newWorld != null) {
+                        newWorld.free();
+                    }
+                    this.pendingWorldCreations.remove(identifier, creationFuture);
+                }
+            }
         }
 
-        world = this.activeWorlds.get(identifier);
-        if (world == null) {
-            //Create world here
-            world = this.createWorld(identifier);
+        world = creationFuture.join();
+        if (world != null) {
+            world.markActive();
+            if (incrementRef) world.acquireRef();
+            identifier.cachedEngineObject = new WeakReference<>(world);
         }
-        world.markActive();
-
-        if (incrementRef) world.acquireRef();
-
-        this.activeWorldLock.unlockWrite(stamp);
-        identifier.cachedEngineObject = new WeakReference<>(world);
         return world;
     }
 
@@ -177,13 +213,9 @@ public abstract class VoxyInstance {
         if (!this.isRunning) {
             throw new IllegalStateException("Cannot create world while not running");
         }
-        if (this.activeWorlds.containsKey(identifier)) {
-            throw new IllegalStateException("Existing world with identifier");
-        }
         Logger.info("Creating new world engine: " + identifier.getLongHash() + "@" + System.identityHashCode(this));
         var world = new WorldEngine(this.createStorage(identifier), this);
         world.setSaveCallback(this.savingService::enqueueSave);
-        this.activeWorlds.put(identifier, world);
         return world;
     }
 

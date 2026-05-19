@@ -12,6 +12,7 @@ import me.cortex.voxy.common.config.compressors.ZSTDCompressor;
 import me.cortex.voxy.common.config.section.SectionSerializationStorage;
 import me.cortex.voxy.common.config.section.SectionStorage;
 import me.cortex.voxy.common.config.section.SectionStorageConfig;
+import me.cortex.voxy.common.config.storage.inmemory.MemoryStorageBackend;
 import me.cortex.voxy.common.config.storage.other.CompressionStorageAdaptor;
 import me.cortex.voxy.common.config.storage.rocksdb.RocksDBStorageBackend;
 import me.cortex.voxy.commonImpl.ImportManager;
@@ -27,6 +28,7 @@ public class VoxyClientInstance extends VoxyInstance {
     private final Config config;
     private final Path basePath;
     private final boolean noIngestOverride;
+    private final boolean isAndroid;
 
     public VoxyClientInstance() {
         {
@@ -35,8 +37,15 @@ public class VoxyClientInstance extends VoxyInstance {
             if (path == null) {
                 path = getBasePath();
             }
+            boolean isAndroid = true;
+            this.isAndroid = isAndroid;
             var basePath = this.basePath = path.normalize();
-            this.config = StorageConfigUtil.getCreateStorageConfig(Config.class, c->c.version==1&&c.sectionStorageConfig!=null, ()->DEFAULT_STORAGE_CONFIG, basePath);
+            this.config = StorageConfigUtil.getCreateStorageConfig(
+                    Config.class,
+                    c->c.version==1&&c.sectionStorageConfig!=null,
+                    ()->createDefaultStorageConfig(isAndroid),
+                    basePath
+            );
         }
         super();
         this.updateDedicatedThreads();
@@ -75,6 +84,10 @@ public class VoxyClientInstance extends VoxyInstance {
         ctx.setProperty(ConfigBuildCtx.WORLD_IDENTIFIER, identifier.getWorldId());
         ctx.setProperty(ConfigBuildCtx.PLAYER_UUID, Minecraft.getInstance().getUser().getProfileId().toString().replace(':','-'));
         ctx.pushPath(ConfigBuildCtx.DEFAULT_STORAGE_PATH);
+        if (this.isAndroid) {
+            Logger.info("Using in-memory storage backend on Android for compatibility");
+            return new SectionSerializationStorage(new MemoryStorageBackend());
+        }
         return this.config.sectionStorageConfig.build(ctx);
     }
 
@@ -100,11 +113,30 @@ public class VoxyClientInstance extends VoxyInstance {
         public SectionStorageConfig sectionStorageConfig;
     }
 
-    private static final Config DEFAULT_STORAGE_CONFIG;
-    static {
+    private static Config createDefaultStorageConfig(boolean isAndroid) {
         var config = new Config();
-        config.sectionStorageConfig = StorageConfigUtil.createDefaultSerializer();
-        DEFAULT_STORAGE_CONFIG = config;
+        if (isAndroid) {
+            var serializer = new SectionSerializationStorage.Config();
+            serializer.storage = new MemoryStorageBackend.Config();
+            config.sectionStorageConfig = serializer;
+        } else {
+            config.sectionStorageConfig = StorageConfigUtil.createDefaultSerializer();
+        }
+        return config;
+    }
+
+    private static boolean isAndroidRuntime() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        String vmName = System.getProperty("java.vm.name", "").toLowerCase();
+        String runtimeName = System.getProperty("java.runtime.name", "").toLowerCase();
+        String vendor = System.getProperty("java.vendor", "").toLowerCase();
+
+        if (osName.contains("android")) return true;
+        if (vmName.contains("dalvik") || vmName.contains("art")) return true;
+        if (runtimeName.contains("android")) return true;
+        if (vendor.contains("android")) return true;
+        // Pojav/Termux-like environments often present as Linux while still running Android runtime stacks.
+        return osName.contains("linux") && (vmName.contains("dalvik") || runtimeName.contains("android"));
     }
 
     private static Path getBasePath() {
