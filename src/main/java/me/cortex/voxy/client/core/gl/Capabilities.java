@@ -63,7 +63,7 @@ public class Capabilities {
         //this.INT64_t = cap.GL_ARB_gpu_shader_int64 || cap.GL_AMD_gpu_shader_int64;
         //The only reliable way to test for int64 support is to try compile a shader
         this.INT64_t = testShaderCompilesOk(ShaderType.COMPUTE, """
-                #version 330
+                #version 460
                 #extension GL_ARB_gpu_shader_int64 : require
                 layout(local_size_x=32) in;
                 void main() {
@@ -72,7 +72,7 @@ public class Capabilities {
                 """);
         if (cap.GL_KHR_shader_subgroup) {
             this.subgroup = testShaderCompilesOk(ShaderType.COMPUTE, """
-                #version 330
+                #version 460
                 #extension GL_KHR_shader_subgroup_basic : require
                 #extension GL_KHR_shader_subgroup_arithmetic : require
                 layout(local_size_x=32) in;
@@ -132,7 +132,7 @@ public class Capabilities {
 
     private static boolean testDepthSampler() {
         String src = """
-                #version 330
+                #version 460
                 layout(local_size_x=16,local_size_y=16) in;
                 
                 layout(binding = 0) uniform sampler2D depthSampler;

@@ -23,7 +23,7 @@ public class ShaderLoader {
     }
 
     private static String defaultVersionForShaderPath(String shaderPath) {
-        return shaderPath.endsWith(".comp") ? "#version 330\n" : "#version 150\n";
+        return shaderPath.endsWith(".comp") ? "#version 460\n" : "#version 320 es\n";
     }
 
 
